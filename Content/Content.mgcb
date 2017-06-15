@@ -10,7 +10,7 @@
 
 #-------------------------------- References --------------------------------#
 
-/reference:..\bin\DesktopGL\AnyCPU\Debug\MonoGame.Extended.Content.Pipeline.dll
+/reference:..\..\_NOT TRACKED\MonoGame.Extended-develop\Source\MonoGame.Extended.Content.Pipeline\bin\MonoGame.Extended.Content.Pipeline.dll
 
 #---------------------------------- Content ---------------------------------#
 

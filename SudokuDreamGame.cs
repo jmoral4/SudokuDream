@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -14,14 +15,15 @@ using MonoGame.Extended.TextureAtlases;
 namespace SudokuDream
 {
     /// <summary>
-    /// This is the main type for your game.
+    /// Sudoku Dream Game - Rough Out
     /// </summary>
-    public class Game1 : Game
+    public class SudokuDreamGame : Game
     {
-        GraphicsDeviceManager graphics;
-        SpriteBatch spriteBatch;
-        private readonly FramesPerSecondCounter _fpsCounter = new FramesPerSecondCounter();
-        private BitmapFont _bitmapFont;
+        GraphicsDeviceManager _graphics;
+        SpriteBatch _spriteBatch;
+        readonly FramesPerSecondCounter _fpsCounter = new FramesPerSecondCounter();
+        BitmapFont _bitmapFont;
+        BitmapFont _impactFont;
         Texture2D _sudokuTiles;
         Texture2D _youWin;
         Texture2D _youLose;
@@ -30,9 +32,14 @@ namespace SudokuDream
         static int x_offset = 0;
         static int y_offset = 0;
         Point TILE_DIMENSIONS = new Point(TILE_WIDTH, TILE_HEIGHT);
-        private readonly List<string> _logLines = new List<string>();
-        private const int _maxLogLines = 13;
-        List<BoardTile> Board = new List<BoardTile>();
+        readonly List<string> _logLines = new List<string>();
+        const int _maxLogLines = 13;
+        List<BoardTile> _board = new List<BoardTile>();
+        Stopwatch _gameTimer = new Stopwatch();
+        int _score = 0;
+        int _multiplier = 1;
+        int _rateOfReduction = 15 * 1000;
+        long _lastMultiplierReductionTime =0;
 
         public enum GameStates { WIN, LOSE, LOADING, PLAYING}
 
@@ -59,19 +66,19 @@ namespace SudokuDream
 
         }
 
-        public Game1()
+        public SudokuDreamGame()
         {
-            graphics = new GraphicsDeviceManager(this);
-            graphics.PreferredBackBufferHeight = 768;
-            graphics.PreferredBackBufferWidth = 1024;
+            _graphics = new GraphicsDeviceManager(this);
+            _graphics.PreferredBackBufferHeight = 768;
+            _graphics.PreferredBackBufferWidth = 1024;
 
             //puzzle size
             var pWidth = TILE_WIDTH*9;
             var pHeight = TILE_HEIGHT * 9;
             //if there's extra
-            x_offset = (graphics.PreferredBackBufferWidth - pWidth) / 2;
+            x_offset = (_graphics.PreferredBackBufferWidth - pWidth) / 2;
             x_offset = x_offset > 0 ? x_offset : 0;
-            y_offset = (graphics.PreferredBackBufferHeight - pHeight) / 2;
+            y_offset = (_graphics.PreferredBackBufferHeight - pHeight) / 2;
             y_offset = y_offset > 0 ? y_offset : 0;
 
             IsMouseVisible = true;
@@ -90,18 +97,12 @@ namespace SudokuDream
         /// </summary>
         protected override void Initialize()
         {
-            // TODO: Add your initialization logic here
             var mouseListener = new MouseListener(new MouseListenerSettings());
             Components.Add(new InputListenerComponent(this, mouseListener));
 
             mouseListener.MouseClicked += (sender, args) => SelectTile(args);
             mouseListener.MouseDoubleClicked += (sender, args) => RotateTile(args);
-            //mouseListener.MouseDown += (sender, args) => LogMessage("{0} mouse button down {1},{2}", args.Button, args.Position.X, args.Position.Y);
             mouseListener.MouseDown += (sender, args) => SelectTile(args);
-            //mouseListener.MouseUp += (sender, args) => LogMessage("{0} mouse button up", args.Button);
-          //  mouseListener.MouseDrag += (sender, args) => LogMessage("Mouse dragged");
-          //  mouseListener.MouseWheelMoved += (sender, args) => LogMessage("Mouse scroll wheel value {0}", args.ScrollWheelValue);
-
 
             base.Initialize();
         }
@@ -114,11 +115,11 @@ namespace SudokuDream
                 var x = (mouseArgs.Position.X - x_offset) / TILE_WIDTH  ;  //yields 0-9
                 var y =( mouseArgs.Position.Y - y_offset) / TILE_HEIGHT ;  // yields 0-9                
 
-                foreach (var vt in Board)
+                foreach (var vt in _board)
                 {
                     vt.Selected = false; //unselect all former tiles
                 }
-                var tile = Board.Where(_ => _.X == x && _.Y == y).First();
+                var tile = _board.First(_ => _.X == x && _.Y == y);
 
                 if( tile.Editable )
                     tile.Selected = true;
@@ -132,7 +133,7 @@ namespace SudokuDream
             //determine which cell we're intersecting. 
             var x = (mouseArgs.Position.X -x_offset) / TILE_WIDTH;  //yields 0-9
             var y = (mouseArgs.Position.Y-y_offset) / TILE_HEIGHT;  // yields 0-9
-            var tile = Board.Where(_ => _.X == x && _.Y == y).First();
+            var tile = _board.Where(_ => _.X == x && _.Y == y).First();
             
             if (tile.Selected)
             {
@@ -154,6 +155,7 @@ namespace SudokuDream
 
         private List<BoardTile> CreateRandomSudokuBoard()
         {
+            
             //circular shift population algorithm
             List<BoardTile> tiles = new List<BoardTile>();
             var rowData = CreateRandomRow();
@@ -184,10 +186,11 @@ namespace SudokuDream
 
 
             }
+
+
+
             return tiles;
         }
-
-        int shifter = 0;
 
         private List<int> CreateRandomRow()
         {
@@ -214,14 +217,14 @@ namespace SudokuDream
         private bool IsValidSolution()
         {    
             //first see if there are any empty cells
-            var hasEmpty = Board.Any(x => x.Value > 9 || x.Value < 1);
+            var hasEmpty = _board.Any(x => x.Value > 9 || x.Value < 1);
             if (hasEmpty)
                 return false;
 
             //check columns
             for (int i = 0; i < 9; i++)
             {
-                var columns = Board.Where(_ => _.X == i).ToList();
+                var columns = _board.Where(_ => _.X == i).ToList();
                 var foundVals = new List<int>();
                 foreach (var col in columns)
                 {
@@ -234,7 +237,7 @@ namespace SudokuDream
             }
             for (int i = 0; i < 9; i++)
             {
-                var rows = Board.Where(_ => _.Y == i).ToList();
+                var rows = _board.Where(_ => _.Y == i).ToList();
                 var foundVals = new List<int>();
                 foreach (var row in rows)
                 {
@@ -274,12 +277,13 @@ namespace SudokuDream
         protected override void LoadContent()
         {
             // Create a new SpriteBatch, which can be used to draw textures.
-            spriteBatch = new SpriteBatch(GraphicsDevice);
+            _spriteBatch = new SpriteBatch(GraphicsDevice);
             _sudokuTiles = Content.Load<Texture2D>("Tiles/numbers");
             _bitmapFont = Content.Load<BitmapFont>("Fonts/montserrat-32");
+            _impactFont = Content.Load<BitmapFont>("Fonts/impact-32");
             _youWin = Content.Load<Texture2D>("Textures/win");
             _youLose = Content.Load<Texture2D>("Textures/lose");
-            LoadBoard();
+            CreateNewGame();
             // TODO: use this.Content to load your game content here
         }
 
@@ -292,20 +296,22 @@ namespace SudokuDream
             // TODO: Unload any non ContentManager content here
         }
 
-        private void LoadBoard()
+        private void CreateNewGame()
         {
-            Board= CreateRandomSudokuBoard();
+            _board= CreateRandomSudokuBoard();
 
             Random r = new Random();
-            //remove 15 tiles
-            int i = 10;
+            //remove tiles
+            int i = 55;
             while (i-- > 0)
             {
-                var t= r.Next(0, Board.Count);
-                Board[t].Value = 10;
-                Board[t].Editable = true;
+                var t= r.Next(0, _board.Count);
+                _board[t].Value = 10;
+                _board[t].Editable = true;
             }
-
+            _score = 0;
+            _multiplier = 1;
+            _gameTimer.Restart();
         }
 
         /// <summary>
@@ -324,9 +330,14 @@ namespace SudokuDream
                 if (_currentState != GameStates.WIN && _currentState != GameStates.LOSE)
                 {
                     var isSolved = IsValidSolution();
-                    //LogMessage("Tried to validate solution:{0}", isSolved);
+
+                    _score = (10000 + (isSolved ? 500 : 0)) -
+                             ((_multiplier / 10) * ((int) _gameTimer.ElapsedMilliseconds / 10000));
+
                     if (isSolved)
+                    {
                         _currentState = GameStates.WIN;
+                    }
                     else
                     {
                         _currentState = GameStates.LOSE;
@@ -338,15 +349,28 @@ namespace SudokuDream
             {
                 if (_currentState == GameStates.WIN || _currentState == GameStates.LOSE)
                 {
-                    LoadBoard();
+                    CreateNewGame();
                     _currentState = GameStates.PLAYING;
                 }
             }
-            // TODO: Add your update logic here
+
+            if (_currentState == GameStates.PLAYING)
+            {
+                _lastMultiplierReductionTime = (long) _gameTimer.ElapsedMilliseconds;
+                _score = 10000 -
+                         ((_multiplier / 10) * ((int)_gameTimer.ElapsedMilliseconds / 10000));
+                if ( _lastMultiplierReductionTime > _rateOfReduction )
+                {                    
+                    //reduce multipler every interval
+                    _lastMultiplierReductionTime = _gameTimer.ElapsedMilliseconds;                   
+                    _multiplier += 1;
+
+
+                }
+            }
 
                 base.Update(gameTime);
         }
-
 
         /// <summary>
         /// This is called when the game should draw itself.
@@ -357,41 +381,52 @@ namespace SudokuDream
             GraphicsDevice.Clear(Color.CornflowerBlue);
 
 
-            spriteBatch.Begin();
+            _spriteBatch.Begin();
             _fpsCounter.Draw(gameTime);
             Window.Title = $"{"FPS"} {_fpsCounter.FramesPerSecond}";
 
             //draw board
-            foreach (var tile in Board)
+            foreach (var tile in _board)
             {
                 if (tile.Selected)
                 {
-                    spriteBatch.Draw(_sudokuTiles, tile.Rect, CreateTileRectangle(tile.Value), Color.Yellow);
+                    _spriteBatch.Draw(_sudokuTiles, tile.Rect, CreateTileRectangle(tile.Value), Color.Yellow);
                 }
                 else if (tile.Editable)
                 {
-                    spriteBatch.Draw(_sudokuTiles, tile.Rect, CreateTileRectangle(tile.Value), Color.Beige);
+                    _spriteBatch.Draw(_sudokuTiles, tile.Rect, CreateTileRectangle(tile.Value), Color.Beige);
                 }
                 else
                 {
-                    spriteBatch.Draw(_sudokuTiles, tile.Rect, CreateTileRectangle(tile.Value), Color.White);
+                    _spriteBatch.Draw(_sudokuTiles, tile.Rect, CreateTileRectangle(tile.Value), Color.White);
                 }
             }
 
             for (var i = 0; i < _logLines.Count; i++)
             {
                 var logLine = _logLines[i];
-                spriteBatch.DrawString(_bitmapFont, logLine, new Vector2(4, i * _bitmapFont.LineHeight), Color.Red * 0.2f);
+                _spriteBatch.DrawString(_bitmapFont, logLine, new Vector2(4, i * _bitmapFont.LineHeight), Color.Red * 0.2f);
             }
 
+            if (_currentState == GameStates.PLAYING)
+            {
+                _spriteBatch.DrawString(_impactFont, _gameTimer.Elapsed.ToString("mm\\:ss"),
+                    new Vector2((Window.ClientBounds.Width / 4) * 3, 0), Color.Gray);
 
+                _spriteBatch.DrawString(_impactFont, "Score: " + _score.ToString(), new Vector2((Window.ClientBounds.Width / 4) * 3, 30), Color.White);
+            }
+
+            if (_currentState == GameStates.WIN || _currentState == GameStates.LOSE)
+            {                
+                _spriteBatch.DrawString(_impactFont, "Score: " + _score.ToString(), new Vector2((Window.ClientBounds.Width / 4) * 3, 5), Color.White);
+                
+            }
             if( _currentState == GameStates.WIN)
-                spriteBatch.Draw(_youWin, new Vector2((Window.ClientBounds.Width-_youWin.Width)/2, Window.ClientBounds.Height/3), Color.White);
+                _spriteBatch.Draw(_youWin, new Vector2((Window.ClientBounds.Width-_youWin.Width)/2, Window.ClientBounds.Height/3), Color.White);
             if(_currentState == GameStates.LOSE)
-                spriteBatch.Draw(_youLose, new Vector2((Window.ClientBounds.Width - _youWin.Width) / 2, Window.ClientBounds.Height / 3), Color.White);
-            //spriteBatch.Draw(_sudokuTiles, new Vector2(100,100), CreateTileRectangle(curNum), Color.White);
+                _spriteBatch.Draw(_youLose, new Vector2((Window.ClientBounds.Width - _youWin.Width) / 2, Window.ClientBounds.Height / 3), Color.White);            
 
-            spriteBatch.End();
+            _spriteBatch.End();
 
             // TODO: Add your drawing code here
 
